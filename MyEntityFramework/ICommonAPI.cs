@@ -1,8 +1,10 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -138,11 +140,25 @@ namespace MyEntityFramework
         /// <param name="predicate">Lambda expression to filter entities.</param>
         /// <returns>Found entity or default.</returns>
         Task<T> FirstOrDefaultAsync(Expression<Func<T, bool>> predicate);
+
+        /// <summary>
+        /// Gets the maximum value of a property for entities that satisfy the predicate.
+        /// </summary>
+        /// <param name="predicate">Lambda expression to filter entities.</param>
+        /// <param name="selector">Lambda expression to select the property.</param>
+        /// <returns>Maximum value of the selected property.</returns>
+        Task<TResult> MaxAsync<TResult>(Expression<Func<T, bool>> predicate, Expression<Func<T, TResult>> selector);
+
+        /// <summary>
+        /// Gets the maximum value of the specified Id property.
+        /// </summary>
+        /// <param name="idPropertyName">Name of the Id property.</param>
+        /// <returns>Maximum value of the specified Id property.</returns>
+        Task<int> GetMaxIdAsync(string idPropertyName);
     }
 
     public class CommonAPI<T> : ICommonAPI<T> where T : class
     {
-
         private readonly DbContext _dbContext;
 
         public CommonAPI(DbContext dbContext)
@@ -250,9 +266,20 @@ namespace MyEntityFramework
                 var parameter = Expression.Parameter(typeof(T), "x");
                 var member = Expression.Property(parameter, propertyInfo);
                 var constant = Expression.Constant(key.Value);
-                var body = Expression.Equal(member, constant);
-                var predicate = Expression.Lambda<Func<T, bool>>(body, parameter);
 
+                Expression body;
+                if (key.Value == null)
+                {
+                    // Handle null values in the key
+                    body = Expression.Equal(member, Expression.Constant(null, propertyInfo.PropertyType));
+                }
+                else
+                {
+                    // Handle non-null values
+                    body = Expression.Equal(member, constant);
+                }
+
+                var predicate = Expression.Lambda<Func<T, bool>>(body, parameter);
                 query = query.Where(predicate);
             }
 
@@ -274,9 +301,20 @@ namespace MyEntityFramework
                 var parameter = Expression.Parameter(typeof(T), "x");
                 var member = Expression.Property(parameter, propertyInfo);
                 var constant = Expression.Constant(key.Value);
-                var body = Expression.Equal(member, constant);
-                var predicate = Expression.Lambda<Func<T, bool>>(body, parameter);
 
+                Expression body;
+                if (key.Value == null)
+                {
+                    // Handle null values in the key
+                    body = Expression.Equal(member, Expression.Constant(null, propertyInfo.PropertyType));
+                }
+                else
+                {
+                    // Handle non-null values
+                    body = Expression.Equal(member, constant);
+                }
+
+                var predicate = Expression.Lambda<Func<T, bool>>(body, parameter);
                 query = query.Where(predicate);
             }
 
@@ -286,11 +324,38 @@ namespace MyEntityFramework
         public virtual void SetNewValuesFromEntity(T entity, object newEntity)
         {
             if (entity == null)
-                throw new ArgumentNullException("Entity not found");
+                throw new ArgumentNullException(nameof(entity));
 
-            _dbContext.Entry(entity).CurrentValues.SetValues(newEntity);
+            if (newEntity == null)
+                throw new ArgumentNullException(nameof(newEntity));
+
+            var entityEntry = _dbContext.Entry(entity);
+
+            foreach (var property in entityEntry.CurrentValues.Properties)
+            {
+                var newValue = newEntity.GetType().GetProperty(property.Name)?.GetValue(newEntity, null);
+                if (newValue != null)
+                {
+                    entityEntry.CurrentValues[property] = newValue;
+                }
+            }
 
             _dbContext.SaveChanges();
         }
+
+        public virtual async Task<TResult> MaxAsync<TResult>(Expression<Func<T, bool>> predicate, Expression<Func<T, TResult>> selector)
+        {
+            return await _dbContext.Set<T>().Where(predicate).MaxAsync(selector);
+        }
+        public virtual async Task<int> GetMaxIdAsync(string idPropertyName)
+        {
+            if (string.IsNullOrWhiteSpace(idPropertyName))
+            {
+                throw new ArgumentException("ID property name must be provided.", nameof(idPropertyName));
+            }
+
+            return await _dbContext.Set<T>().MaxAsync(e => EF.Property<int>(e, idPropertyName));
+        }
     }
+
 }
