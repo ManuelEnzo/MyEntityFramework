@@ -6,7 +6,7 @@ The CommonAPI package provides a generic implementation for managing Data Transf
 You can install the package via the **.NET CLI**:
 
 ```bash
-dotnet add package MyEntityFramework --version 2.0.0
+dotnet add package MyEntityFramework --version 3.0.0
 ```
 ## Usage
 1) **Configure Your DTOs**
@@ -44,7 +44,7 @@ public class MyEntityFrameworkDbContext : DbContext
 
 3) **Register the Services**
 
-In the ConfigureServices method of your Startup class, register the common API services using the AddCommonAPIServices extension method:
+In the ConfigureServices method of your Startup class or in the Program.cs file, you can now register the common API services with a single line of code:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -60,7 +60,7 @@ var host = Host.CreateDefaultBuilder(args)
             options.UseSqlServer(context.Configuration.GetConnectionString("DefaultConnection")));
 
         // Register the common API services
-        services.AddCommonAPIServices(Assembly.GetExecutingAssembly());
+        services.AddCommonAPIServices<YourDbContext>("NamespaceDtos");
 
         // Other services...
     })
@@ -103,28 +103,33 @@ public class MyDtoController : ControllerBase
 
 **Method AddCommonAPIServices**
 
-The AddCommonAPIServices method extends IServiceCollection and adds common API services for each DTO type defined in a specified assembly. Here's a step-by-step explanation of how it works:
+The AddCommonAPIServices method extends IServiceCollection and adds common API services for each DTO type defined in a specified namespace across all loaded assemblies. Here's a step-by-step explanation of how it works:
 
 1) **Method Signature:**
 
 ```csharp
-public static IServiceCollection AddCommonAPIServices(this IServiceCollection services, Assembly assemblyContainingDTOs)
+public static IServiceCollection AddCommonAPIServices<TContext>(this IServiceCollection services, string namespaceLocationDtos)
+    where TContext : DbContext
 ```
 
 **Parameters:**
 
 __services__: The service collection to which we want to add the new services. It is passed as this to indicate that it is an extension method.
-__assemblyContainingDTOs__: The assembly containing the DTO types. This parameter is used to find and register the services for all DTOs defined in that assembly.
+__namespaceLocationDtos__: The namespace containing the DTO types. This parameter is used to find and register the services for all DTOs defined in that namespace.
 
 2) **Retrieve DTO Types:**
 
 ```csharp
-var dtoTypes = assemblyContainingDTOs.GetTypes()
-    .Where(t => t.Namespace != null && t.Namespace.EndsWith("DTO") && !t.IsAbstract && !t.IsInterface);
+var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+
+var dtoTypes = assemblies.SelectMany(assembly => assembly.GetTypes())
+                         .Where(t => t.Namespace != null &&
+                                     string.Equals(t.Namespace, namespaceLocationDtos, StringComparison.InvariantCultureIgnoreCase) &&
+                                     !t.IsAbstract && 
+                                     !t.IsInterface);
 ```
 Uses reflection to get all types defined in the specified assembly.
 Filters the types to get only those that:
- - Have a namespace ending with **"DTO"**.
  - Are not **abstract types** (abstract).
  - Are not **interfaces** (interface).
 
@@ -138,7 +143,7 @@ foreach (var dtoType in dtoTypes)
 
     services.AddScoped(commonApiType, serviceProvider =>
     {
-        var dbContext = serviceProvider.GetRequiredService<MyEntityFrameworkDbContext>();
+        var dbContext = serviceProvider.GetRequiredService<TContext>();
         return Activator.CreateInstance(commonApiImplementationType, dbContext);
     });
 }
@@ -149,7 +154,7 @@ For each DTO type found:
  - **Creates a generic type** for CommonAPI<DTO> using the same DTO type.
  - **Registers the ICommonAPI<DTO> service in the service collection (services) as scoped** (i.e., a new instance is created for each request).
 The registration uses a factory method that:
- - **Retrieves an instance of MyEntityFrameworkDbContext** from the service provider.
+ - **Retrieves an instance of TContext (your DbContext) from the service provider.
  - **Creates an instance of CommonAPI<DTO>** passing the DbContext.
 
 4) **Return the Modified Service Collection:**
