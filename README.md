@@ -6,7 +6,7 @@ The CommonAPI package provides a generic implementation for managing Data Transf
 You can install the package via the **.NET CLI**:
 
 ```bash
-dotnet add package MyEntityFramework --version 3.0.0
+dotnet add package MyEntityFramework --version 3.0.1
 ```
 ## Usage
 1) **Configure Your DTOs**
